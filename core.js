@@ -621,8 +621,18 @@
   }
 
   function executeNanobotAction(actionPayload, raw) {
-    const actionRaw = actionPayload && actionPayload.action ? String(actionPayload.action).trim() : '';
-    const replyRaw = actionPayload && actionPayload.reply ? String(actionPayload.reply).trim() : '';
+    let actionRaw = '';
+    let replyRaw = '';
+    let channel = '';
+    let query = '';
+    if (typeof actionPayload === 'string') {
+      actionRaw = String(actionPayload).trim();
+    } else if (actionPayload && typeof actionPayload === 'object') {
+      actionRaw = String(actionPayload.action || '').trim();
+      replyRaw = String(actionPayload.reply || '').trim();
+      channel = String(actionPayload.channel || '').trim();
+      query = String(actionPayload.query || actionPayload.q || actionPayload.keyword || '').trim();
+    }
     const legacyActionMap = {
       next: '下一个',
       prev: '上一个',
@@ -633,10 +643,11 @@
       open_channel: '打开频道',
       volume_up: '调高音量',
       volume_down: '调低音量',
+      search: '搜索',
+      find: '搜索',
       none: '无动作'
     };
     const action = legacyActionMap[actionRaw.toLowerCase ? actionRaw.toLowerCase() : actionRaw] || actionRaw;
-    const channel = actionPayload && actionPayload.channel ? String(actionPayload.channel).trim() : '';
     if (!action || action === '无动作') {
       if (replyRaw) {
         return { executed: false, replied: true, replyText: replyRaw };
@@ -671,7 +682,27 @@
     if (action === '切换静音') { video.muted = !video.muted; voiceStatus.textContent = video.muted ? '已静音' : '取消静音'; return { executed: true, replied: false, replyText: replyRaw }; }
     if (action === '全屏') { triggerFullscreenByVoice(); return { executed: true, replied: false, replyText: replyRaw }; }
     if (action === '调高音量') { adjustVolume('up', raw); return { executed: true, replied: false, replyText: replyRaw }; }
-    if (action === '调低音量') { adjustVolume('down', raw); return { executed: true, replied: false, replyText: replyRaw }; }
+    if (action === '调低音量' || action === '调小音量') { adjustVolume('down', raw); return { executed: true, replied: false, replyText: replyRaw }; }
+    // 兼容用户说 "退出全屏"、"取消全屏"、"缩小屏幕" 等指令
+    if (action === '退出全屏' || action === '取消全屏' || action === '缩小屏幕') {
+      const exitFn = document.exitFullscreen || document.webkitExitFullscreen;
+      if (exitFn && (document.fullscreenElement || document.webkitFullscreenElement)) {
+        try {
+          const ret = exitFn.call(document);
+          if (ret && typeof ret.then === 'function') {
+            ret.then(() => { voiceStatus.textContent = '已退出全屏'; }).catch(err => { console.warn('退出全屏失败:', err); voiceStatus.textContent = '退出全屏失败'; });
+          } else {
+            voiceStatus.textContent = '已退出全屏';
+          }
+        } catch (err) {
+          console.warn('退出全屏异常:', err);
+          voiceStatus.textContent = '退出全屏失败';
+        }
+      } else {
+        voiceStatus.textContent = '当前未处于全屏';
+      }
+      return { executed: true, replied: false, replyText: replyRaw };
+    }
     if (action === '打开频道') {
       const index = findChannelIndexByName(channel);
       if (index < 0) {
@@ -682,6 +713,21 @@
       updateSelection();
       channels[index].click();
       voiceStatus.textContent = '已打开：' + channels[index].textContent;
+      return { executed: true, replied: false, replyText: replyRaw };
+    }
+
+    if (action === '搜索') {
+      const q = query || raw || replyRaw || channel || '';
+      if (!q) {
+        voiceStatus.textContent = '搜索关键词为空';
+        return { executed: true, replied: false, replyText: replyRaw };
+      }
+      voiceStatus.textContent = `正在搜索：${q}`;
+      try {
+        window.location.href = 'http://localhost:8080/s=' + encodeURIComponent(q);
+      } catch (e) {
+        console.warn('跳转搜索失败：', e);
+      }
       return { executed: true, replied: false, replyText: replyRaw };
     }
 

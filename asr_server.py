@@ -23,9 +23,14 @@ ALLOWED_ACTIONS = {
     "播放",
     "切换静音",
     "全屏",
+    "缩小屏幕",
+    "退出全屏",
+    "取消全屏",
     "打开频道",
     "调高音量",
     "调低音量",
+    "打开频道",
+    "搜索",
     "无动作",
 }
 
@@ -36,9 +41,15 @@ LEGACY_ACTION_MAP = {
     "play": "播放",
     "toggle_mute": "切换静音",
     "fullscreen": "全屏",
+    "exit_fullscreen": "退出全屏",
+    "unfullscreen": "退出全屏",
+    "minimize": "缩小屏幕",
     "open_channel": "打开频道",
     "volume_up": "调高音量",
     "volume_down": "调低音量",
+    "search": "搜索",
+    "find": "搜索",
+    "unmute": "切换静音",
     "none": "无动作",
 }
 
@@ -111,15 +122,20 @@ def _normalize_action_payload(payload: Optional[dict]) -> dict:
         action = "无动作"
 
     channel = str(payload.get("channel", "")).strip()
+    query = str(payload.get("query", "")).strip()
     reply = str(payload.get("reply", "")).strip()
     reason = str(payload.get("reason", "")).strip()
 
+    # 保留 channel 仅当 action 为 打开频道；保留 query 仅当 action 为 搜索
     if action != "打开频道":
         channel = ""
+    if action != "搜索":
+        query = ""
 
     return {
         "action": action,
         "channel": channel,
+        "query": query,
         "reply": reply,
         "reason": reason,
     }
@@ -134,6 +150,7 @@ def _extract_action_fields_from_text(raw: str) -> Optional[dict]:
     action_match = re.search(r'"action"\s*:\s*"([^"]+)"', text)
     channel_match = re.search(r'"channel"\s*:\s*"([^"]*)"', text)
     reply_match = re.search(r'"reply"\s*:\s*"([^"]*)"', text)
+    query_match = re.search(r'"query"\s*:\s*"([^\"]*)"', text)
 
     if not action_match and not reply_match:
         return None
@@ -142,6 +159,7 @@ def _extract_action_fields_from_text(raw: str) -> Optional[dict]:
         "action": action_match.group(1).strip() if action_match else "无动作",
         "channel": channel_match.group(1).strip() if channel_match else "",
         "reply": reply_match.group(1).strip() if reply_match else "",
+        "query": query_match.group(1).strip() if query_match else "",
         "reason": "regex_fallback",
     }
 
@@ -158,10 +176,12 @@ def _run_nanobot_agent(transcript: str, channels: List[str]) -> dict:
     prompt = (
         "你是播放器语音命令解析器。"
         "请根据用户语音转写，输出严格 JSON，不要输出任何额外文本。"
-        "\n允许 action: 下一个, 上一个, 暂停, 播放, 切换静音, 全屏, 打开频道, 调高音量, 调低音量, 无动作"
-        "\n如果是 打开频道，请在 channel 填入最匹配频道名。"
+        "\n允许 action: 下一个, 上一个, 暂停, 播放, 切换静音, 全屏, 打开频道, 调高音量, 调低音量, 搜索, 无动作"
+        "\n优先规则：如果用户说的话中明确包含或模糊匹配可用频道列表中的某个频道名称，优先将意图视为频道控制（action 设置为 \"打开频道\"，并在 channel 字段填入最匹配的频道名）；"
+        "否则若用户话语包含 \"电影\"、\"片\" 或明显为影视片名（例如 \"我想看变形金刚\"），则视为搜索意图（action 设置为 \"搜索\"，并在 query 字段填入搜索关键词或片名）。"
+        "\n示例：用户说 \"我想看湖南卫视\" → 返回 {\"action\": \"打开频道\", \"channel\": \"湖南卫视\"}；用户说 \"我想看变形金刚\" → 返回 {\"action\": \"搜索\", \"query\": \"变形金刚\"}。"
         "\n如果用户是在提问（例如“现在几点了”），action 设为 无动作，并在 reply 中给出简洁中文回答。"
-        "\n输出格式: {\"action\":\"...\",\"channel\":\"...\",\"reply\":\"...\",\"reason\":\"...\"}"
+        "\n输出格式: {\"action\":\"...\",\"channel\":\"...\",\"query\":\"...\",\"reply\":\"...\",\"reason\":\"...\"}"
         "\n\n可用频道列表:\n"
         f"{channels_text}"
         "\n\n用户语音:\n"

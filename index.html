@@ -8,26 +8,43 @@
   <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
   <!-- Custom CSS -->
   <link rel="stylesheet" href="style.css">
+  <script>
+    function toLibreTVSearch(raw) {
+      if (!raw) return;
+      const cleaned = String(raw).trim().replace(/^(我想看|我要看|播放|搜索|找|我要播放|帮我找|想看)\s*/i, '');
+      if (!cleaned) return;
+      const target = 'http://localhost:8080/s=' + encodeURIComponent(cleaned);
+      window.location.href = target;
+    }
+    document.addEventListener('DOMContentLoaded', function() {
+      const input = document.getElementById('rootSearchInput');
+      const btn = document.getElementById('rootSearchBtn');
+      if (input) input.addEventListener('keydown', function(e){ if (e.key === 'Enter') toLibreTVSearch(input.value); });
+      if (btn) btn.addEventListener('click', function(){ toLibreTVSearch(document.getElementById('rootSearchInput').value); });
+    });
+  </script>
 </head>
 <body>
-  <header>
-    <!-- Replace "logo.png" with your logo file name -->
-    <img src="logo.png" alt="IPTV Logo">
+  <header style="text-align:center;margin-top:12px;">
+    <img src="logo.png" alt="IPTV Logo" style="height:56px">
     <h1>阿公阿嫲呾嘀队 WEB player</h1>
   </header>
-  <div class="file-input">
-    <!-- <p>Channels are loaded automatically from <code>example.m3u8</code>.</p> -->
-    <p>
-      语音控制：
-      <button id="voiceBtn">启用语音</button>
-      <span id="voiceStatus" style="margin-left:8px;color:#666;">未激活</span>
-    </p>
-    <p>识别结果：<span id="voiceResult" style="font-weight:600;color:#fff;">（空）</span></p>
-    <p style="color:#222;font-size:0.9em;">示例命令："打开湖南卫视"、"播放安徽卫视"、"下一个"、"暂停"、"静音"、"全屏"</p>
-  </div>
-  <!-- 语音输入控制 -->
-  <div class="voice-input" id="voiceControl" style="margin:12px 0;">
 
+  <div class="file-input" style="max-width:720px;margin:12px auto;padding:8px;color:#fff;display:flex;align-items:center;justify-content:space-between;gap:12px;">
+    <div style="flex:1;min-width:0;">
+      <div style="display:flex;align-items:center;gap:8px;">
+        <strong>语音控制：</strong>
+        <button id="voiceBtn">启用语音</button>
+        <span id="voiceStatus" style="margin-left:8px;color:#666;">未激活</span>
+      </div>
+      <div style="margin-top:6px;color:#aaa;font-size:0.9em;">
+        识别结果：<span id="voiceResult" style="font-weight:600;color:#fff;">（空）</span>
+      </div>
+    </div>
+    <div style="flex:0 0 360px;display:flex;align-items:center;justify-content:flex-end;gap:8px;">
+      <input id="rootSearchInput" placeholder="例如：变形金刚" aria-label="搜索到LibreTV" style="flex:1;padding:8px;border-radius:6px;border:1px solid #444;background:#000;color:#fff;" />
+      <button id="rootSearchBtn" style="padding:8px 12px;border-radius:6px;border:none;background:#1f8ef1;color:#fff;">搜索</button>
+    </div>
   </div>
   <div class="main-container">
     <!-- Player area -->
@@ -37,16 +54,13 @@
       </div>
       <video id="videoPlayer" controls></video>
     </div>
-    <!-- Channel list -->
-    <aside class="channel-list" id="channelList">
-      <div id="channelsContainer">
-        <!-- Channels will be generated dynamically here -->
-      </div>
+    <aside class="channel-list" id="channelList" style="margin-top:12px;">
+      <div id="channelsContainer"></div>
     </aside>
   </div>
-  <footer>
-    © 2026 23.5ﾟN GEEKDAY | All Rights Reserved.
-  </footer>
+
+  <footer style="text-align:center;margin:24px 0;color:#888">© 2026 23.5ﾟN GEEKDAY | All Rights Reserved.</footer>
+
   <script src="core.js"></script>
 </body>
 </html>
