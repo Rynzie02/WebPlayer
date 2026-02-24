@@ -21,31 +21,49 @@
       const btn = document.getElementById('rootSearchBtn');
       if (input) input.addEventListener('keydown', function(e){ if (e.key === 'Enter') toLibreTVSearch(input.value); });
       if (btn) btn.addEventListener('click', function(){ toLibreTVSearch(document.getElementById('rootSearchInput').value); });
+      // 侧栏开关
+      const toggle = document.getElementById('sidebarToggleBtn') || document.getElementById('sidebarToggle');
+      if (toggle) {
+        toggle.addEventListener('click', function(){
+          document.body.classList.toggle('sidebar-open');
+          const sb = document.getElementById('leftSidebar');
+          if (sb) sb.setAttribute('aria-hidden', String(!document.body.classList.contains('sidebar-open')));
+        });
+      }
     });
   </script>
 </head>
 <body>
+  <button id="sidebarToggleBtn" class="sidebar-toggle-floating" title="定时任务">☰</button>
+  <!-- 左侧可收起侧栏（定时任务将在此渲染） -->
+  <div class="left-sidebar" id="leftSidebar" aria-hidden="true">
+    <!-- <div class="sidebar-toggle" id="sidebarToggle" title="切换侧栏">☰</div> -->
+    <div class="sidebar-content" id="leftSidebarContent"></div>
+  </div>
   <header style="text-align:center;margin-top:12px;">
-    <img src="logo.png" alt="IPTV Logo" style="height:56px">
+    <img src="logo.png" alt="IPTV Logo" style="height:56px;margin-right:120px;">
     <h1>阿公阿嫲呾嘀队 WEB player</h1>
   </header>
 
-  <div class="file-input" style="max-width:720px;margin:12px auto;padding:8px;color:#fff;display:flex;align-items:center;justify-content:space-between;gap:12px;">
-    <div style="flex:1;min-width:0;">
-      <div style="display:flex;align-items:center;gap:8px;">
+  <div class="file-input" style="max-width:1200px;margin:12px auto;padding:8px;display:flex;align-items:center;gap:12px;">
+    <!-- 语音识别区域左移 -->
+    <div style="flex:1;min-width:0;text-align:left;">
+      <div style="display:flex;align-items:center;gap:12px;font-size:1.2em;">
         <strong>语音控制：</strong>
-        <button id="voiceBtn">启用语音</button>
-        <span id="voiceStatus" style="margin-left:8px;color:#666;">未激活</span>
+        <button id="voiceBtn" style="font-size:1.1em;padding:6px 12px;">启用语音</button>
+        <span id="voiceStatus" style="margin-left:8px;font-size:1.1em;display:inline-block;width:600px;">未激活</span>
       </div>
-      <div style="margin-top:6px;color:#aaa;font-size:0.9em;">
-        识别结果：<span id="voiceResult" style="font-weight:600;color:#fff;">（空）</span>
+      <div style="margin-top:10px;font-size:1.1em;text-align:left;">
+        识别结果：<span id="voiceResult" style="font-weight:600;">（空）</span>
       </div>
     </div>
-    <div style="flex:0 0 360px;display:flex;align-items:center;justify-content:flex-end;gap:8px;">
-      <input id="rootSearchInput" placeholder="例如：变形金刚" aria-label="搜索到LibreTV" style="flex:1;padding:8px;border-radius:6px;border:1px solid #444;background:#000;color:#fff;" />
-      <button id="rootSearchBtn" style="padding:8px 12px;border-radius:6px;border:none;background:#1f8ef1;color:#fff;">搜索</button>
+    <!-- 搜索框减小三分之一并右移 -->
+    <div style="flex:0 0 240px;display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-left:auto;">
+      <input id="rootSearchInput" placeholder="例如：变形金刚" aria-label="搜索到LibreTV" style="flex:1;padding:8px;border-radius:6px;" />
+      <button id="rootSearchBtn" style="padding:8px 12px;border-radius:6px;border:none;">搜索</button>
     </div>
   </div>
+
   <div class="main-container">
     <!-- Player area -->
     <div class="player-container">
@@ -59,7 +77,7 @@
     </aside>
   </div>
 
-  <footer style="text-align:center;margin:24px 0;color:#888">© 2026 23.5ﾟN GEEKDAY | All Rights Reserved.</footer>
+  <footer style="text-align:center;margin:24px 0;">© 2026 23.5ﾟN GEEKDAY | All Rights Reserved.</footer>
 
   <script src="core.js"></script>
 </body>

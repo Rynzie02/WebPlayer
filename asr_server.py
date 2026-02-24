@@ -132,12 +132,39 @@ def _normalize_action_payload(payload: Optional[dict]) -> dict:
     if action != "搜索":
         query = ""
 
+    # 可选的延迟/时间字段：支持 delay_seconds（以秒为单位）和 execute_at（UNIX ms）
+    delay_seconds = None
+    if payload.get("delay_seconds") is not None:
+        try:
+            delay_seconds = float(payload.get("delay_seconds"))
+        except Exception:
+            delay_seconds = None
+    elif payload.get("delaySeconds") is not None:
+        try:
+            delay_seconds = float(payload.get("delaySeconds"))
+        except Exception:
+            delay_seconds = None
+
+    execute_at = None
+    if payload.get("execute_at") is not None:
+        try:
+            execute_at = int(payload.get("execute_at"))
+        except Exception:
+            execute_at = None
+    elif payload.get("executeAt") is not None:
+        try:
+            execute_at = int(payload.get("executeAt"))
+        except Exception:
+            execute_at = None
+
     return {
         "action": action,
         "channel": channel,
         "query": query,
         "reply": reply,
         "reason": reason,
+        "delay_seconds": delay_seconds,
+        "execute_at": execute_at,
     }
 
 
@@ -179,9 +206,10 @@ def _run_nanobot_agent(transcript: str, channels: List[str]) -> dict:
         "\n允许 action: 下一个, 上一个, 暂停, 播放, 切换静音, 全屏, 打开频道, 调高音量, 调低音量, 搜索, 无动作"
         "\n优先规则：如果用户说的话中明确包含或模糊匹配可用频道列表中的某个频道名称，优先将意图视为频道控制（action 设置为 \"打开频道\"，并在 channel 字段填入最匹配的频道名）；"
         "否则若用户话语包含 \"电影\"、\"片\" 或明显为影视片名（例如 \"我想看变形金刚\"），则视为搜索意图（action 设置为 \"搜索\"，并在 query 字段填入搜索关键词或片名）。"
-        "\n示例：用户说 \"我想看湖南卫视\" → 返回 {\"action\": \"打开频道\", \"channel\": \"湖南卫视\"}；用户说 \"我想看变形金刚\" → 返回 {\"action\": \"搜索\", \"query\": \"变形金刚\"}。"
         "\n如果用户是在提问（例如“现在几点了”），action 设为 无动作，并在 reply 中给出简洁中文回答。"
-        "\n输出格式: {\"action\":\"...\",\"channel\":\"...\",\"query\":\"...\",\"reply\":\"...\",\"reason\":\"...\"}"
+        "\n如果用户的语句包含时间或延迟指令（例如：\"30秒后切换到湖南卫视\"、\"半分钟后播放湖南卫视\"、\"5分钟后换到下一个频道\"），请在输出 JSON 中加入数值字段 `delay_seconds`（单位：秒，数值）。"
+        "\n如果用户给出了明确的时刻（例如：\"今天晚上8点播放湖南卫视\"），也可以返回字段 `execute_at`（UNIX 毫秒时间戳）。优先返回 `delay_seconds` 以便客户端直接调度。"
+        "\n输出格式示例： {\"action\":\"打开频道\",\"channel\":\"湖南卫视\",\"delay_seconds\":30} 或 {\"action\":\"搜索\",\"query\":\"变形金刚\"}"
         "\n\n可用频道列表:\n"
         f"{channels_text}"
         "\n\n用户语音:\n"

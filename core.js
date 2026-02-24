@@ -407,7 +407,7 @@
     if (!text) return '';
     const match = text.match(/"reply"\s*:\s*"([^"]+)"/);
     if (match && match[1]) return match[1].trim();
-    if (text.length > 120) return '已收到回复';
+    // if (text.length > 120) return '已收到回复';
     return text;
   }
 
@@ -633,6 +633,14 @@
       channel = String(actionPayload.channel || '').trim();
       query = String(actionPayload.query || actionPayload.q || actionPayload.keyword || '').trim();
     }
+    // 支持 nanobot 返回的 delay_seconds 字段
+    let delaySeconds = null;
+    if (actionPayload && typeof actionPayload === 'object') {
+      if (actionPayload.delay_seconds != null) delaySeconds = Number(actionPayload.delay_seconds);
+      else if (actionPayload.delaySeconds != null) delaySeconds = Number(actionPayload.delaySeconds);
+      else if (actionPayload.delay != null) delaySeconds = Number(actionPayload.delay);
+      if (Number.isNaN(delaySeconds)) delaySeconds = null;
+    }
     const legacyActionMap = {
       next: '下一个',
       prev: '上一个',
@@ -648,6 +656,41 @@
       none: '无动作'
     };
     const action = legacyActionMap[actionRaw.toLowerCase ? actionRaw.toLowerCase() : actionRaw] || actionRaw;
+    // 如果 nanobot 指定了延迟，并且是打开频道或切换上下一个频道，优先调度
+    if (delaySeconds && delaySeconds > 0) {
+      if (action === '打开频道') {
+        scheduleChannelSwitch(delaySeconds, channel || raw, raw);
+        return { executed: true, replied: false, replyText: replyRaw };
+      }
+      if (action === '下一个') {
+        setTimeout(() => {
+          if (channels.length === 0) return voiceStatus.textContent = '频道列表为空';
+          currentSelectedIndex = (currentSelectedIndex + 1 + channels.length) % channels.length;
+          updateSelection();
+          channels[currentSelectedIndex].click();
+          voiceStatus.textContent = '已切换到下一个频道';
+        }, delaySeconds * 1000);
+        voiceStatus.textContent = `已设置定时：${delaySeconds} 秒后切换到下一个频道`;
+        return { executed: true, replied: false, replyText: replyRaw };
+      }
+      if (action === '上一个') {
+        setTimeout(() => {
+          if (channels.length === 0) return voiceStatus.textContent = '频道列表为空';
+          currentSelectedIndex = (currentSelectedIndex - 1 + channels.length) % channels.length;
+          updateSelection();
+          channels[currentSelectedIndex].click();
+          voiceStatus.textContent = '已切换到上一个频道';
+        }, delaySeconds * 1000);
+        voiceStatus.textContent = `已设置定时：${delaySeconds} 秒后切换到上一个频道`;
+        return { executed: true, replied: false, replyText: replyRaw };
+      }
+      // 其他动作暂不在 UI 列表显示，直接延迟执行（简单实现）
+      setTimeout(() => {
+        executeNanobotAction(actionPayload, raw);
+      }, delaySeconds * 1000);
+      voiceStatus.textContent = `已设置定时：${delaySeconds} 秒后执行指令`;
+      return { executed: true, replied: false, replyText: replyRaw };
+    }
     if (!action || action === '无动作') {
       if (replyRaw) {
         return { executed: false, replied: true, replyText: replyRaw };
@@ -736,10 +779,246 @@
     }
     return { executed: false, replied: false, replyText: '' };
   }
+  // 定时切换支持：解析 "30秒后切换到湖南卫视" 等自然表达，并调度执行
+  const scheduledSwitches = [];
+
+  function chineseNumberToInt(str) {
+    if (!str) return 0;
+    const map = {零:0, 一:1, 二:2, 三:3, 四:4, 五:5, 六:6, 七:7, 八:8, 九:9};
+    str = String(str).replace(/\s+/g, '');
+    if (str === '半') return 0.5;
+    // 简单处理十位和个位，例如 "二十三"、"三十"、"十"、"十一"
+    if (/^十$/.test(str)) return 10;
+    let total = 0;
+    if (str.includes('百')) {
+      // 不做复杂百位处理，回退到数字0
+      return 0;
+    }
+    const tenMatch = str.match(/^(?:([一二三四五六七八九])?十)?([一二三四五六七八九])?$/);
+    if (tenMatch) {
+      const tens = tenMatch[1] ? map[tenMatch[1]] : (str.startsWith('十') ? 1 : 0);
+      const ones = tenMatch[2] ? map[tenMatch[2]] : 0;
+      total = tens * 10 + ones;
+      return total;
+    }
+    // 单个汉字数字
+    if (str.length === 1 && map[str] !== undefined) return map[str];
+    return 0;
+  }
+
+  function parseDelaySecondsFromText(text) {
+    if (!text) return null;
+    text = String(text || '').toLowerCase();
+    // 匹配形如："30秒后切换到..." 或 "三十秒后切换到..." 或 "半分钟后切换到..."
+    const timerMatch = text.match(/(?:([0-9]+|[零一二三四五六七八九十百]+|半)\s*(秒钟|秒|分钟|分)\s*后)[\s,，]*?(?:再)?(?:切换到|打开|播放|换到|去看)\s*(.+)/i);
+    if (!timerMatch) return null;
+    let numRaw = timerMatch[1];
+    const unit = timerMatch[2];
+    const channelName = timerMatch[3] ? timerMatch[3].trim() : '';
+    let amount = 0;
+    if (numRaw === '半') {
+      amount = 0.5;
+    } else if (/^\d+$/.test(numRaw)) {
+      amount = parseInt(numRaw, 10);
+    } else {
+      amount = chineseNumberToInt(numRaw);
+    }
+    if (!unit) return null;
+    let seconds = 0;
+    if (unit.includes('分')) seconds = Math.round(amount * 60);
+    else seconds = Math.round(amount);
+    if (!seconds || seconds <= 0) return null;
+    return { seconds, channelName };
+  }
+
+  function scheduleChannelSwitch(seconds, channelName, raw) {
+    const executeAt = Date.now() + seconds * 1000;
+
+    // 如果 seconds 小于等于 0，则立即执行并返回
+    if (!seconds || seconds <= 0) {
+      const indexNow = findChannelIndexByName(channelName);
+      if (indexNow >= 0) {
+        currentSelectedIndex = indexNow;
+        updateSelection();
+        channels[indexNow].click();
+        voiceStatus.textContent = `已切换到：${channels[indexNow].textContent}`;
+      } else {
+        voiceStatus.textContent = `未找到频道：${channelName}`;
+      }
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      // 在执行时移除该任务
+      const idx = scheduledSwitches.findIndex(s => s.id === timeoutId);
+      if (idx >= 0) scheduledSwitches.splice(idx, 1);
+      // 尝试查找频道并切换
+      const index = findChannelIndexByName(channelName);
+      if (index >= 0) {
+        currentSelectedIndex = index;
+        updateSelection();
+        channels[index].click();
+        voiceStatus.textContent = `已切换到：${channels[index].textContent}`;
+      } else {
+        voiceStatus.textContent = `定时到点，但未找到频道：${channelName}`;
+      }
+      updateScheduledUI();
+    }, seconds * 1000);
+
+    scheduledSwitches.push({ id: timeoutId, channelName, executeAt, raw, delaySeconds: seconds });
+    const human = seconds >= 60 ? `${Math.round(seconds/60)} 分钟` : `${seconds} 秒`;
+    voiceStatus.textContent = `已设置定时：${human} 后切换到 ${channelName}（可说：取消定时切换）`;
+    updateScheduledUI();
+  }
+
+  function cancelScheduledSwitches() {
+    if (!scheduledSwitches.length) {
+      voiceStatus.textContent = '当前没有定时切换任务';
+      return;
+    }
+    scheduledSwitches.forEach(s => clearTimeout(s.id));
+    scheduledSwitches.length = 0;
+    voiceStatus.textContent = '已取消所有定时切换任务';
+    updateScheduledUI();
+  }
+
+  // 页面上的定时任务面板与管理
+  let scheduledUIInterval = null;
+
+  function createScheduledPanel() {
+    if (document.getElementById('scheduledPanel')) return;
+    const container = document.createElement('div');
+    container.id = 'scheduledPanel';
+    container.style.marginTop = '8px';
+    container.style.padding = '8px';
+    container.style.border = '1px solid rgba(0,0,0,0.08)';
+    container.style.borderRadius = '6px';
+    container.style.maxWidth = '600px';
+    container.style.fontSize = '0.95em';
+
+    const title = document.createElement('div');
+    title.textContent = '定时任务';
+    title.style.fontWeight = '600';
+    title.style.marginBottom = '6px';
+    container.appendChild(title);
+
+    const list = document.createElement('div');
+    list.id = 'scheduledList';
+    list.style.display = 'flex';
+    list.style.flexDirection = 'column';
+    list.style.gap = '6px';
+    container.appendChild(list);
+
+    const attachTo = document.getElementById('leftSidebarContent') || document.getElementById('scheduledPanelContainer') || document.querySelector('.file-input') || document.body;
+    if (attachTo && attachTo.nodeType === 1) {
+      attachTo.appendChild(container);
+    } else if (attachTo && attachTo.parentNode) {
+      attachTo.parentNode.insertBefore(container, attachTo.nextSibling);
+    } else {
+      document.body.appendChild(container);
+    }
+    updateScheduledUI();
+  }
+
+  function humanRemaining(ms) {
+    if (ms <= 0) return '立即';
+    const s = Math.ceil(ms / 1000);
+    if (s >= 60) return `${Math.ceil(s/60)} 分钟`;
+    return `${s} 秒`;
+  }
+
+  function cancelScheduledById(id) {
+    const idx = scheduledSwitches.findIndex(s => s.id === id);
+    if (idx >= 0) {
+      clearTimeout(scheduledSwitches[idx].id);
+      scheduledSwitches.splice(idx, 1);
+      updateScheduledUI();
+      voiceStatus.textContent = '已取消该定时任务';
+    }
+  }
+
+  function updateScheduledUI() {
+    createScheduledPanel();
+    const list = document.getElementById('scheduledList');
+    if (!list) return;
+    list.innerHTML = '';
+    if (!scheduledSwitches.length) {
+      const empty = document.createElement('div');
+      empty.style.color = '#666';
+      empty.textContent = '当前无任务';
+      list.appendChild(empty);
+    } else {
+      scheduledSwitches.forEach(s => {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.alignItems = 'center';
+
+        const left = document.createElement('div');
+        const name = s.channelName || s.raw || '(未命名)';
+        left.textContent = `${name}`;
+        left.style.marginRight = '8px';
+
+        const right = document.createElement('div');
+        right.style.display = 'flex';
+        right.style.gap = '8px';
+        right.style.alignItems = 'center';
+
+        const time = document.createElement('div');
+        time.style.color = '#333';
+        time.style.minWidth = '72px';
+        time.style.textAlign = 'right';
+        time.dataset.executeAt = s.executeAt;
+        time.textContent = humanRemaining(s.executeAt - Date.now());
+
+        const btn = document.createElement('button');
+        btn.textContent = '取消';
+        btn.style.padding = '4px 8px';
+        btn.style.borderRadius = '4px';
+        btn.style.border = 'none';
+        btn.style.background = '#999';
+        btn.style.color = '#fff';
+        btn.addEventListener('click', () => cancelScheduledById(s.id));
+
+        right.appendChild(time);
+        right.appendChild(btn);
+
+        row.appendChild(left);
+        row.appendChild(right);
+        list.appendChild(row);
+      });
+    }
+
+    // 启动或停止倒计时更新
+    if (scheduledSwitches.length && !scheduledUIInterval) {
+      scheduledUIInterval = setInterval(() => {
+        const times = document.querySelectorAll('#scheduledList [data-execute-at]');
+        times.forEach(t => {
+          const at = parseInt(t.dataset.executeAt, 10);
+          t.textContent = humanRemaining(at - Date.now());
+        });
+      }, 1000);
+    }
+    if (!scheduledSwitches.length && scheduledUIInterval) {
+      clearInterval(scheduledUIInterval);
+      scheduledUIInterval = null;
+    }
+  }
 
   function handleVoiceCommand(raw) {
     if (!raw) return;
     const text = raw.toLowerCase();
+    // 优先处理取消定时指令
+    if (text.includes('取消') && (text.includes('定时') || text.includes('定时切换') || text.includes('取消切换'))) {
+      cancelScheduledSwitches();
+      return;
+    }
+    // 解析像“30秒后切换到湖南卫视”的定时指令
+    const timerInfo = parseDelaySecondsFromText(raw);
+    if (timerInfo) {
+      scheduleChannelSwitch(timerInfo.seconds, timerInfo.channelName || timerInfo.raw || raw, raw);
+      return;
+    }
     // 简单命令处理
     if (text.includes('下一个') || text.includes('下一')) {
       if (channels.length === 0) return voiceStatus.textContent = '频道列表为空';
@@ -792,4 +1071,7 @@
 
     voiceStatus.textContent = '未识别命令：' + raw;
   }
+
+  // 页面初始化时即渲染定时任务面板（显示“当前无任务”）
+  updateScheduledUI();
 })();
